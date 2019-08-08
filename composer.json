@@ -1,5 +1,5 @@
 {
-  "name": "mijnkantoor/hellohi.middleware.oauth",
+  "name": "mijnkantoor/middleware.oauth",
   "description": "Laravel OAuth2 middleware",
   "type": "library",
   "license": "Proprietary",

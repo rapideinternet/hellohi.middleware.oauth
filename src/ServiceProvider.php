@@ -1,8 +1,6 @@
 <?php namespace MijnKantoor\OauthMiddleware;
 
-use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
-use MijnKantoor\OauthMiddleware\Middleware\ValidateOauth;
 
 class ServiceProvider extends BaseServiceProvider
 {
@@ -30,10 +28,6 @@ class ServiceProvider extends BaseServiceProvider
     public function boot()
     {
         $this->publishes([$this->configPath() => config_path('oauth-middleware.php')]);
-        /** @var \Illuminate\Foundation\Http\Kernel $kernel */
-        $kernel = $this->app->make(Kernel::class);
-
-        $kernel->prependMiddleware(ValidateOAuth::class);
     }
 
     protected function configPath()
