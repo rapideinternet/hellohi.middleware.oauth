@@ -1,19 +1,52 @@
-<?php
+<?php namespace MijnKantoor\OauthMiddleware\Middleware;
 
-
-namespace Middleware;
-
-
-use App\Services\HelloHiService;
-use App\User;
 use Closure;
 use GuzzleHttp\Client;
+use Illuminate\Contracts\Auth\StatefulGuard;
+use Illuminate\Session\Store;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Str;
+use MijnKantoor\OauthMiddleware\Services\ApiService;
 
 class ValidateOauth
 {
+    /**
+     * @var ApiService
+     */
+    private $service;
+    /**
+     * @var Store
+     */
+    private $session;
+    /**
+     * @var Client
+     */
+    private $client;
+    /**
+     * @var StatefulGuard
+     */
+    private $auth;
+
+
+    const ACCESS_TOKEN = 'access_token';
+    const EXPIRES_IN = 'expires_in';
+    const REFRESH_TOKEN = 'refresh_token';
+    const TENANT_ID = 'tenant_id';
+
+    /**
+     * ValidateOauth constructor.
+     * @param ApiService $service
+     * @param Store $session
+     * @param StatefulGuard $auth
+     */
+    public function __construct(ApiService $service, Store $session, StatefulGuard $auth)
+    {
+        $this->service = $service;
+        $this->client = new Client();
+        $this->session = $session;
+        $this->auth = $auth;
+    }
+
     /**
      * Handle an incoming request.
      *
@@ -23,28 +56,28 @@ class ValidateOauth
      */
     public function handle($request, Closure $next)
     {
-        // redirecting back from oauth server?
-        if (request()->code) {
-            $http = new Client();
-            $response = $http->post(env('HH_AUTH_URL') . '/oauth/token', [
+        if ($request->has('code')) {
+            $response = $this->client->post(config('oauth-middleware.api_url') . '/oauth/token', [
                 'form_params' => [
                     'grant_type' => 'authorization_code',
-                    'client_id' => env('HH_CLIENT_ID'),
-                    'client_secret' => env('HH_CLIENT_SECRET'),
-                    'redirect_uri' => route('user.redirect'),
-                    'code' => request()->code,
+                    'client_id' => config('oauth-middleware.client_id'),
+                    'client_secret' => config('oauth-middleware.client_secret'),
+                    'redirect_uri' => route(config('oauth-middleware.redirect_route')),
+                    'code' => $request->get('code'),
                 ],
             ]);
+
             $data = json_decode((string)$response->getBody(), true);
             $this->storeTokenResponse($data);
+
             // create new user or login?
             $this->createOrLoginUser($data);
             // token is in memory now
-            return redirect("/");
+            return redirect(route(config('oauth-middleware.default_redirect')));
         } elseif (!$this->refreshToken() || !auth()->check()) { // no valid token in memory? redirect to login
             $query = http_build_query([
-                'client_id' => env('HH_CLIENT_ID'),
-                'redirect_uri' => route('user.redirect'),
+                'client_id' => config('oauth-middleware.client_id'),
+                'redirect_uri' => route(config('oauth-middleware.redirect_route')),
                 'response_type' => 'code',
                 'scope' => '',
             ]);
@@ -56,35 +89,35 @@ class ValidateOauth
 
     private function createOrLoginUser($tokenResponse)
     {
-        $helloHiService = app()->make(HelloHiService::class);
-        $helloHiService->init($tokenResponse['access_token']);
-        $me = $helloHiService->getMe();
+        $this->service->init($tokenResponse['access_token']);
+        $me = $this->service->getMe();
+
         if ($me) {
-            $email = $me['user']['email'];
-            $name = implode(" ", [$me['user']['first_name'], $me['user']['last_name']]);
             $tenantId = $me['tenants'][0]['id'];
-            $user = User::updateOrCreate(
-                ['email' => $email],
-                [
-                    'name' => $name,
-                    'password' => Str::random(32)
-                ]
+            $user = $this->createUserModel(
+                $me['user']['email'],
+                implode(" ", [$me['user']['first_name'], $me['user']['last_name']])
             );
-            auth()->login($user);
+
+
+            $this->auth->login($user);
+
             // set the tenantId from the tenants include
             $this->storeTenantId($tenantId);
-            $helloHiService->setTenantId($tenantId);
+            $this->service->setTenantId($tenantId);
         }
     }
 
-    private function refreshToken()
+    private function refreshToken(): bool
     {
-        $accesToken = Session::get('hellohi_access_token');
-        $expires = Session::get('hellohi_expires_in');
-        $refreshToken = Session::get('hellohi_refresh_token');
+        $accesToken = $this->session->get($this->getCacheKey(self::ACCESS_TOKEN));
+        $expires = $this->session->get($this->getCacheKey(self::EXPIRES_IN));
+        $refreshToken = $this->session->get($this->getCacheKey(self::REFRESH_TOKEN));
+
         if (!$accesToken || !$expires || !$refreshToken) {
             return false;
         }
+
         $expires = Carbon::createFromTimestamp($expires);
         if (Carbon::now()->gt($expires)) {
             $http = new Client();
@@ -108,13 +141,42 @@ class ValidateOauth
 
     private function storeTokenResponse($data)
     {
-        Session::put('hellohi_access_token', $data['access_token']);
-        Session::put('hellohi_refresh_token', $data['refresh_token']);
-        Session::put('hellohi_expires_in', Carbon::now()->addSeconds($data['expires_in'])->timestamp);
+        $this->session->put($this->getCacheKey(self::ACCESS_TOKEN), $data['access_token']);
+        $this->session->put($this->getCacheKey(self::REFRESH_TOKEN), $data['refresh_token']);
+        $this->session->put(
+            $this->getCacheKey(self::EXPIRES_IN),
+            \Carbon\Carbon::now()->addSeconds($data['expires_in'])->timestamp
+        );
     }
 
     private function storeTenantId($tenantId)
     {
-        Session::put('hellohi_tenant_id', $tenantId);
+        $this->session->put($this->getCacheKey(self::TENANT_ID), $tenantId);
+    }
+
+    private function getCacheKey($keyName)
+    {
+        return sprintf(
+            '%s_%s',
+            config('oauth-middleware.cache.prefix'),
+            config('oauth-middleware.cache.keys.' . $keyName)
+        );
+    }
+
+    private function createUserModel($name, $email)
+    {
+        /** @var \Illuminate\Database\Eloquent\Builder $class */
+        $class = config('oauth-middleware.user');
+
+        /** @var \Illuminate\Auth\Authenticatable; $user */
+        $user = $class::updateOrCreate(
+            ['email' => $email],
+            [
+                'name' => $name,
+                'password' => Str::random(32)
+            ]
+        );
+
+        return $user;
     }
 }
