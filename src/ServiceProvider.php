@@ -32,6 +32,6 @@ class ServiceProvider extends BaseServiceProvider
 
     protected function configPath()
     {
-        return __DIR__ . '/../config/cors.php';
+        return __DIR__ . '/../config/oauth-middleware.php';
     }
 }
