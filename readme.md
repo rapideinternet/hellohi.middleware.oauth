@@ -4,7 +4,7 @@
 
 Require the `mijnkantoor/middleware.oauth` package in your `composer.json` and update your dependencies:
 ```sh
-$ composer require mijnkantoor/lmiddleware.oauth
+$ composer require mijnkantoor/middleware.oauth
 ```
 
 For laravel >=5.5 that's all. This package supports Laravel new [Package Discovery](https://laravel.com/docs/5.5/packages#package-discovery).
