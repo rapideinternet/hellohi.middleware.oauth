@@ -9,9 +9,9 @@ return [
     */
 
     //API Url to MijnKantoor
-    'api_url' => env('API_URL'),
-    'client_id' => env('CLIENT_ID'),
-    'client_secret' => env('CLIENT_SECRET'),
+    'api_url' => env('HH_MW_API_URL'),
+    'client_id' => env('HH_MW_CLIENT_ID'),
+    'client_secret' => env('HH_MW_CLIENT_SECRET'),
 
     'cache' => [
         'prefix' => 'mijnkantoor',

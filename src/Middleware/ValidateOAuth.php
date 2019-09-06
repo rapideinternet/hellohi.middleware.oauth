@@ -2,6 +2,7 @@
 
 use Closure;
 use GuzzleHttp\Client;
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Session\Store;
 use Illuminate\Support\Carbon;
@@ -22,11 +23,6 @@ class ValidateOauth
      * @var Client
      */
     private $client;
-    /**
-     * @var StatefulGuard
-     */
-    private $auth;
-
 
     const ACCESS_TOKEN = 'access_token';
     const EXPIRES_IN = 'expires_in';
@@ -39,12 +35,11 @@ class ValidateOauth
      * @param Store $session
      * @param StatefulGuard $auth
      */
-    public function __construct(ApiService $service, Store $session, StatefulGuard $auth)
+    public function __construct(ApiService $service, Store $session)
     {
         $this->service = $service;
         $this->client = new Client();
         $this->session = $session;
-        $this->auth = $auth;
     }
 
     /**
@@ -73,6 +68,7 @@ class ValidateOauth
             // create new user or login?
             $this->createOrLoginUser($data);
             // token is in memory now
+
             return redirect(route(config('oauth-middleware.default_redirect')));
         } elseif (!$this->refreshToken() || !auth()->check()) { // no valid token in memory? redirect to login
             $query = http_build_query([
@@ -81,8 +77,10 @@ class ValidateOauth
                 'response_type' => 'code',
                 'scope' => '',
             ]);
-            return redirect(env('HH_AUTH_URL') . '/oauth/authorize?' . $query);
+
+            return redirect(env('HH_MW_AUTH_URL') . '/oauth/authorize?' . $query);
         }
+
         // token is in memory now
         return $next($request);
     }
@@ -99,8 +97,7 @@ class ValidateOauth
                 implode(" ", [$me['user']['first_name'], $me['user']['last_name']])
             );
 
-
-            $this->auth->login($user);
+            auth()->login($user);
 
             // set the tenantId from the tenants include
             $this->storeTenantId($tenantId);
@@ -121,12 +118,12 @@ class ValidateOauth
         $expires = Carbon::createFromTimestamp($expires);
         if (Carbon::now()->gt($expires)) {
             $http = new Client();
-            $response = $http->post(env('HH_AUTH_URL') . '/oauth/token', [
+            $response = $http->post(env('HH_MW_API_URL') . '/oauth/token', [
                 'form_params' => [
                     'grant_type' => 'refresh_token',
                     'refresh_token' => $refreshToken,
-                    'client_id' => env('HH_CLIENT_ID'),
-                    'client_secret' => env('HH_CLIENT_SECRET'),
+                    'client_id' => env('HH_MW_CLIENT_ID'),
+                    'client_secret' => env('HH_MW_CLIENT_SECRET'),
                     'scope' => '',
                 ],
             ]);
