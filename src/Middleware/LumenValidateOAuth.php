@@ -3,12 +3,11 @@
 use Closure;
 use GuzzleHttp\Client;
 use Illuminate\Contracts\Auth\StatefulGuard;
-use Illuminate\Session\Store;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use MijnKantoor\OauthMiddleware\Services\ApiService;
 
-class ValidateOauth
+class LumenValidateOAuth
 {
     /**
      * @var ApiService
@@ -34,11 +33,10 @@ class ValidateOauth
      * @param Store $session
      * @param StatefulGuard $auth
      */
-    public function __construct(ApiService $service, Store $session)
+    public function __construct(ApiService $service)
     {
         $this->service = $service;
         $this->client = new Client();
-        $this->session = $session;
     }
 
     /**
@@ -62,14 +60,19 @@ class ValidateOauth
             ]);
 
             $data = json_decode((string)$response->getBody(), true);
-            $this->storeTokenResponse($data);
+
+            //Store token respones somewhere we can test it again
+
+            $this->storeTokenResponse($request, $data);
 
             // create new user or login?
-            $this->createOrLoginUser($data);
+            $this->createOrLoginUser($request, $data);
             // token is in memory now
 
             return redirect(route(config('oauth-middleware.default_redirect')));
-        } elseif (!$this->refreshToken() || !auth()->check()) { // no valid token in memory? redirect to login
+        }
+
+        if (!$this->refreshToken($request) || !auth()->check()) { // no valid token in memory? redirect to login
             $query = http_build_query([
                 'client_id' => config('oauth-middleware.client_id'),
                 'redirect_uri' => route(config('oauth-middleware.redirect_route')),
@@ -84,7 +87,7 @@ class ValidateOauth
         return $next($request);
     }
 
-    private function createOrLoginUser($tokenResponse)
+    private function createOrLoginUser($request, $tokenResponse)
     {
         $this->service->init($tokenResponse['access_token']);
         $me = $this->service->getMe();
@@ -99,18 +102,18 @@ class ValidateOauth
             auth()->login($user);
 
             // set the tenantId from the tenants include
-            $this->storeTenantId($tenantId);
+            $this->storeTenantId($request, $tenantId);
             $this->service->setTenantId($tenantId);
         }
     }
 
-    private function refreshToken(): bool
+    private function refreshToken($request): bool
     {
-        $accesToken = $this->session->get($this->getCacheKey(self::ACCESS_TOKEN));
-        $expires = $this->session->get($this->getCacheKey(self::EXPIRES_IN));
-        $refreshToken = $this->session->get($this->getCacheKey(self::REFRESH_TOKEN));
+        $accessToken = $request->session->get($this->getCacheKey(self::ACCESS_TOKEN));
+        $expires = $request->session->get($this->getCacheKey(self::EXPIRES_IN));
+        $refreshToken = $request->session->get($this->getCacheKey(self::REFRESH_TOKEN));
 
-        if (!$accesToken || !$expires || !$refreshToken) {
+        if (!$accessToken || !$expires || !$refreshToken) {
             return false;
         }
 
@@ -135,19 +138,19 @@ class ValidateOauth
         return true;
     }
 
-    private function storeTokenResponse($data)
+    private function storeTokenResponse($request, $data)
     {
-        $this->session->put($this->getCacheKey(self::ACCESS_TOKEN), $data['access_token']);
-        $this->session->put($this->getCacheKey(self::REFRESH_TOKEN), $data['refresh_token']);
-        $this->session->put(
+        $request->session->put($this->getCacheKey(self::ACCESS_TOKEN), $data['access_token']);
+        $request->session->put($this->getCacheKey(self::REFRESH_TOKEN), $data['refresh_token']);
+        $request->session->put(
             $this->getCacheKey(self::EXPIRES_IN),
             \Carbon\Carbon::now()->addSeconds($data['expires_in'])->timestamp
         );
     }
 
-    private function storeTenantId($tenantId)
+    private function storeTenantId($request, $tenantId)
     {
-        $this->session->put($this->getCacheKey(self::TENANT_ID), $tenantId);
+        $request->session->put($this->getCacheKey(self::TENANT_ID), $tenantId);
     }
 
     private function getCacheKey($keyName)

@@ -7,14 +7,18 @@
     {
       "name": "Peter Mein",
       "email": "peter@infratron.io"
+    },
+    {
+      "name": "Rens Reinders",
+      "email": "rens@rapide.software"
     }
   ],
   "require": {
     "php": ">=7",
-    "illuminate/support": "5.5.x|5.6.x|5.7.x|5.8.x",
+    "illuminate/support": "5.5.x|5.6.x|5.7.x|5.8.x|^6.0",
     "symfony/http-foundation": "^3.1|^4",
     "symfony/http-kernel": "^3.1|^4",
-    "hellohi/api-client": "^1.2",
+    "hellohi/api-client": "dev-master",
     "ext-json": "*"
   },
   "autoload": {
